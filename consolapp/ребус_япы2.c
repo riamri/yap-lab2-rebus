@@ -273,7 +273,7 @@ static void recurse(int pos) {
         return;
     }
 
-    int l = pos;
+    int l = R.order[pos];
 
    
     {
@@ -412,3 +412,4 @@ int main(int argc, char** argv) {
     }
     return 0;
 }
+
