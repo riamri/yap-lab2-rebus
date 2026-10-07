@@ -199,6 +199,67 @@ static int check_all(int* carry_out) {
     return 1;
 }
 
+static int try_derive_letter(int k, int carry_in, int letter, int* value) {
+    int known_sum = 0;
+    int unknown_count = 0;
+    int unknown_is_result = 0;
+
+    for (int j = 0; j < R.col_addend_count[k]; j++) {
+        int l = R.col_addend[k][j];
+        if (l == letter) {
+            unknown_count++;
+        }
+        else if (digit[l] < 0) {
+            return 0;
+        }
+        else {
+            known_sum += digit[l];
+        }
+    }
+
+    int rl = R.col_result[k];
+    if (rl != -1) {
+        if (rl == letter) {
+            unknown_count++;
+            unknown_is_result = 1;
+        }
+        else if (digit[rl] < 0) {
+            return 0;
+        }
+    }
+
+    if (unknown_count != 1) return 0;
+
+    int leading = R.is_leading[letter];
+
+    if (!unknown_is_result) {
+        if (rl == -1) return 0;
+        int d_res = digit[rl];
+        int target = (d_res - carry_in - known_sum) % 10;
+        if (target < 0) target += 10;
+
+        if (leading && target == 0) return 0;
+        if (used[target]) return 0;
+
+        int total = known_sum + target + carry_in;
+        if (total % 10 != d_res) return 0;
+
+        *value = target;
+        return 1;
+    }
+    else {
+        int total = known_sum + carry_in;
+        int d_res = total % 10;
+
+        if (leading && d_res == 0) return 0;
+        if (used[d_res]) return 0;
+
+        *value = d_res;
+        return 1;
+    }
+}
+
+
 static void recurse(int pos) {
     if (solution_found) return;
     nodes_visited++;
@@ -214,6 +275,31 @@ static void recurse(int pos) {
 
     int l = pos;
 
+   
+    {
+        int c = 0;
+        for (int k = 0; k < R.n_columns; k++) {
+            int c_out;
+            int r = check_column(k, c, &c_out);
+            if (r == -1) {
+                int v;
+                if (try_derive_letter(k, c, l, &v)) {
+                    used[v] = 1;
+                    digit[l] = v;
+                    recurse(pos + 1);
+                    if (solution_found) return;  
+                    used[v] = 0;
+                    digit[l] = -1;
+                    return;
+                }
+                break;
+            }
+            if (r == 0) return;
+            c = c_out;
+        }
+    }
+
+   
     int leading = R.is_leading[l];
     int start_d = leading ? 1 : 0;
 
