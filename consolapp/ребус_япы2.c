@@ -8,8 +8,9 @@
 
 #define MAX_LETTERS   26
 #define MAX_TERMS      7
-#define MAX_LEN       32 // это кол-во букв букв в одном слове, можно поменять но не меньше 10 (тк цифры от 0 до 9)
+#define MAX_LEN       32
 #define MAX_LINE     256
+
 
 typedef struct {
     int  n_terms;
@@ -23,12 +24,21 @@ typedef struct {
     int  result_len;
 
     int  is_leading[MAX_LETTERS];
+
+    int  n_columns;
+    int  col_addend[MAX_LEN][MAX_TERMS];
+    int  col_addend_count[MAX_LEN];
+    int  col_result[MAX_LEN];
+
+    int  order[MAX_LETTERS];
 } Rebus;
 
 static Rebus R;
 static int   digit[MAX_LETTERS];
 static int   used[10];
 static int   solution_found;
+static unsigned long long nodes_visited;
+
 
 static int letter_id(char c) {
     return R.idx[(unsigned char)c - 'A'];
@@ -42,6 +52,7 @@ static void add_letter(char c) {
         R.n_letters++;
     }
 }
+
 
 static int parse(const char* s) {
     R.n_terms = 0;
@@ -95,8 +106,143 @@ static int parse(const char* s) {
     R.result_len = len;
     R.is_leading[R.result[0]] = 1;
 
-    return (R.n_terms >= 2 && R.n_letters <= 10) ? 1 : 0;
+    if (R.n_terms < 2 || R.n_letters > 10) return 0;
+
+
+    R.n_columns = R.result_len;
+    for (int t = 0; t < R.n_terms; t++)
+        if (R.term_len[t] > R.n_columns) R.n_columns = R.term_len[t];
+
+    for (int k = 0; k < R.n_columns; k++) {
+        R.col_addend_count[k] = 0;
+        R.col_result[k] = -1;
+    }
+
+    for (int t = 0; t < R.n_terms; t++) {
+        int L = R.term_len[t];
+        for (int i = 0; i < L; i++) {
+            int k = L - 1 - i;
+            R.col_addend[k][R.col_addend_count[k]++] = R.terms[t][i];
+        }
+    }
+
+    for (int i = 0; i < R.result_len; i++) {
+        int k = R.result_len - 1 - i;
+        R.col_result[k] = R.result[i];
+    }
+
+ 
+
+    int placed[MAX_LETTERS] = { 0 };
+    int ord_size = 0;
+
+    for (int k = 0; k < R.n_columns; k++) {
+        for (int j = 0; j < R.col_addend_count[k]; j++) {
+            int l = R.col_addend[k][j];
+            if (!placed[l]) {
+                placed[l] = 1;
+                R.order[ord_size++] = l;
+            }
+        }
+        if (R.col_result[k] != -1) {
+            int l = R.col_result[k];
+            if (!placed[l]) {
+                placed[l] = 1;
+                R.order[ord_size++] = l;
+            }
+        }
+    }
+
+    return (ord_size == R.n_letters) ? 1 : 0;
 }
+
+static int check_column(int k, int carry_in, int* carry_out) {
+    int sum = 0;
+
+    for (int j = 0; j < R.col_addend_count[k]; j++) {
+        int l = R.col_addend[k][j];
+        if (digit[l] < 0) return -1;
+        sum += digit[l];
+    }
+
+    int rl = R.col_result[k];
+    if (rl != -1 && digit[rl] < 0) return -1;
+
+    int total = sum + carry_in;
+    int d_res = total % 10;
+    int c_out = total / 10;
+
+    if (rl != -1) {
+        if (digit[rl] != d_res) return 0;
+    }
+    else {
+        if (d_res != 0) return 0;
+    }
+
+    *carry_out = c_out;
+    return 1;
+}
+
+static int check_all(int* carry_out) {
+    int c = 0;
+    for (int k = 0; k < R.n_columns; k++) {
+        int c_out;
+        int r = check_column(k, c, &c_out);
+        if (r == -1) {
+            *carry_out = c;
+            return -1;
+        }
+        if (r == 0) return 0;
+        c = c_out;
+    }
+    *carry_out = c;
+    return 1;
+}
+
+static void recurse(int pos) {
+    if (solution_found) return;
+    nodes_visited++;
+
+    if (pos == R.n_letters) {
+        int carry;
+        int r = check_all(&carry);
+        if (r == 1 && carry == 0) {
+            solution_found = 1;
+        }
+        return;
+    }
+
+    int l = pos;
+
+    int leading = R.is_leading[l];
+    int start_d = leading ? 1 : 0;
+
+    for (int d = start_d; d <= 9; d++) {
+        if (used[d]) continue;
+
+        used[d] = 1;
+        digit[l] = d;
+
+     
+        int all_ok = 1;
+        int c = 0;
+        for (int k = 0; k < R.n_columns; k++) {
+            int c_out;
+            int r = check_column(k, c, &c_out);
+            if (r == -1) break;
+            if (r == 0) { all_ok = 0; break; }
+            c = c_out;
+        }
+
+        if (all_ok) recurse(pos + 1);
+
+        if (solution_found) return;  
+
+        used[d] = 0;
+        digit[l] = -1;
+    }
+}
+
 
 static long value_of(const int* ids, int len) {
     long v = 0;
@@ -104,45 +250,15 @@ static long value_of(const int* ids, int len) {
     return v;
 }
 
-static int check_full(void) {
-    long sum = 0;
-    for (int t = 0; t < R.n_terms; t++)
-        sum += value_of(R.terms[t], R.term_len[t]);
-    long res = value_of(R.result, R.result_len);
-    return sum == res;
-}
-
-static unsigned long long nodes_visited;
-
-static void recurse(int pos) {
-    if (solution_found) return;
-    nodes_visited++;
-
-    if (pos == R.n_letters) {
-        if (check_full()) solution_found = 1;
-        return;
-    }
-
-    int leading = R.is_leading[pos];
-    for (int d = (leading ? 1 : 0); d <= 9; d++) {
-        if (used[d]) continue;
-        used[d] = 1;
-        digit[pos] = d;
-        recurse(pos + 1);
-        used[d] = 0;
-        if (solution_found) return;
-    }
-}
-
 static void print_solution(void) {
-    printf("Значения:");
+    printf("Solution: ");
     for (int i = 0; i < R.n_letters; i++) {
         printf("%c=%d", R.letters[i], digit[i]);
         if (i + 1 < R.n_letters) printf(" ");
     }
     printf("\n");
 
-    printf("Решение:");
+    printf("Expression: ");
     for (int t = 0; t < R.n_terms; t++) {
         printf("%ld", value_of(R.terms[t], R.term_len[t]));
         if (t + 1 < R.n_terms) printf(" + ");
@@ -154,14 +270,16 @@ static double now_seconds(void) {
     return (double)clock() / (double)CLOCKS_PER_SEC;
 }
 
+
 static int solve(const char* line) {
     if (!parse(line)) {
-        printf("Ошибка разбора: %s\n", line);
+        printf("Invalid expression: %s\n", line);
         return 0;
     }
-    printf("Ребус: %s\n", line);
+    printf("Rebus: %s\n", line);
 
     memset(used, 0, sizeof(used));
+    for (int i = 0; i < MAX_LETTERS; i++) digit[i] = -1;
     solution_found = 0;
     nodes_visited = 0;
 
@@ -173,15 +291,14 @@ static int solve(const char* line) {
         print_solution();
     }
     else {
-        printf("Решение не найдено.\n");
+        printf("No solution.\n");
     }
-    printf("Узлов: %llu   Время: %.6f с\n",
+    printf("Nodes: %llu   Time: %.6f sec\n",
         nodes_visited, t1 - t0);
     return solution_found;
 }
 
 int main(int argc, char** argv) {
-    
     setlocale(LC_ALL, "Russian");
 
     if (argc >= 2) {
@@ -198,7 +315,7 @@ int main(int argc, char** argv) {
         return solve(buf) ? 0 : 1;
     }
 
-    printf("Вводите головоломки, по одной на строку (пустая строка для завершения):\n");
+    printf("Enter expressions, one per line (empty line to finish):\n");
     char line[MAX_LINE];
     while (fgets(line, sizeof(line), stdin)) {
         size_t n = strlen(line);
